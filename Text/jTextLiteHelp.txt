@@ -1,0 +1,19 @@
+Help text for jTextLite
+
+jTextLite is a simple text editor written in Java MIDP and designed to run on mobile phones which have external memory cards.  You can use jTextLite to read text files from and write text files to the memory card.  For added security, you can encrypt text files using the secure RC4 algorithm, which is useful for storing sensitive data.  jTextLite is compatible with jText (available from www.freepoc.org) which runs on Windows, Mac, Linux machines.
+
+Using jTextLite
+
+To take quick notes, just start typing.  You can exit the program and your text will be remembered.  To clear text, use the Clear option.
+
+To load a text file from memory card, use the Browse option.  Depending on your device, you may be asked for permission to access the filing system (a Java 'feature' that I can't turn off).  To save the text again, select Save.  To save under a different filename, select Save As and then Select to overwrite an existing file or New to create a new file.  Your 4 most recent files are always available by selecting Recent.
+
+To save an encrypted version, select the Password option, then Save.  Your file will be encrypted and the filename will be modified to end in a hash (eg. text.txt#).  In future, you will be required to give the password to open the file.  If the password is lost, there is no way to recover the data.  If you have encrypted your data then it will not immediately be displayed when you load the program (this is a security measure).  If you have encrypted your text file and saved it to memory card, then the unencrypted version will be deleted (this is also a security measure).
+
+The size of text files which can be opened in jTextLite depends on your device.  The program will warn if you try to open a file bigger than 20,000 bytes.  You can change this limit in the Preferences option.
+
+I hope you find the program useful.
+
+Malcolm Bryant
+malcolm@freepoc.org
+www.freepoc.org
