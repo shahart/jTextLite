@@ -1,4 +1,4 @@
-package jTextLite;
+import jTextLite.jTextLite;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -28,6 +28,26 @@ import javax.microedition.midlet.MIDletStateChangeException;
 import javax.microedition.rms.RecordStore;
 import javax.microedition.rms.RecordStoreException;
 
+/*
+
+2.02 modifications
+
++ Find goes to correct section OK
++ \n\n to section and remove before apply changes OK
+Order of menu OK
++ Chunk size to preferences OK
++ Prev to last OK
++Remember my section and not the current offset\ CANCELED
++Show chunk always CANCELS
++ save last find str, position, instance number
+
+// defects: no Alert after several "next edit"
+
+// 2.02 - stability, enhance find result, changes dialog
+
+// TODO? undo
+
+*/
 public class jTextLite extends MIDlet implements CommandListener, Runnable {
   Thread thread;
   
@@ -57,6 +77,8 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
   
   Form f9;
   
+  Form f10; // goto
+  
   ChoiceGroup cgrf;
   
   ChoiceGroup cgReplaceAll;
@@ -65,17 +87,23 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
   
   TextBox tb;
   
+  String tbAll;
+  
   TextBox helpText;
   
   TextField tf;
   
   TextField tf1;
   
-  String password = "";
+  TextField tf_find;
+  
+  TextField tf_repl;
+  
+  String sfind = "";
+  
+  String srepl = "";
   
   boolean start = true;
-  
-  boolean checkPasswordAgain = false;
   
   boolean saveMode = false;
   
@@ -87,13 +115,11 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
   
   Command okCommand = new Command("OK", 2, 3);
   
-  Command browseCommand = new Command("Browse", 2, 2);
+  Command browseCommand = new Command("Browse", 2, 3);
   
   Command saveCommand = new Command("Save", 2, 3);
   
   Command newCommand = new Command("New", 2, 3);
-  
-  Command passwordCommand = new Command("Password", 2, 4);
   
   Command saveAsCommand = new Command("Save As", 2, 3);
   
@@ -101,17 +127,13 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
   
   Command recentCommand = new Command("Recent", 2, 3);
   
-  Command findCommand = new Command("Find", 2, 3);
-  
-  Command findAgainCommand = new Command("Find Again", 2, 3);
+  Command findCommand = new Command("Find", 2, 2);
+
+  Command gotoCommand = new Command("Goto Position", 2, 3);
   
   Command replaceCommand = new Command("Replace", 2, 3);
   
-  Command goToCommand = new Command("Go To", 2, 3);
-  
   Command topCommand = new Command("Top", 2, 3);
-  
-  Command bottomCommand = new Command("Bottom", 2, 3);
   
   Command cancelCommand = new Command("Cancel", 1, 3);
   
@@ -125,7 +147,11 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
   
   Command aboutCommand = new Command("About", 2, 5);
   
-  static final String SEED = "jCry";
+  Command editApplyCommand = new Command("Edit/ View", 2, 2);
+  
+  Command editPrevCommand = new Command("Edit Prev", 2, 2);
+  
+  Command editNextCommand = new Command("Edit Next", 2, 2);
   
   static final String UP_DIRECTORY = "..";
   
@@ -135,7 +161,7 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
   
   static final char SEP = '/';
   
-  String currDirName = "";
+  String currDirName = "/";
   
   String saveFile = "";
   
@@ -147,24 +173,29 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
   
   Image[] iconList;
   
-  int[] state;
-  
-  int x;
-  
-  int y;
-  
-  int temp;
-  
   int runMode;
-  
-  int passwordError = 0;
   
   int largeFileWarning = 20000;
   
   int caretPosition = 0;
   
+  int currSection = 0;
+  
+  int chunkSize = 750;
+  
+  int instance = 0;
+  
+  String changed = "";
+  
+  boolean warn = false;
+  
+  String debug = "";
+  
+  boolean inEdit = false;
+  
+  int changes = 0;
+  
   public jTextLite() {
-    this.currDirName = "/";
     try {
       this.dirIcon = Image.createImage("/icons/dir.png");
     } catch (IOException iOException) {
@@ -182,36 +213,38 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
   }
   
   public void startApp() throws MIDletStateChangeException {
-    if (this.start) {
-      this.start = false;
-      openDataStore();
-      this.display = Display.getDisplay(this);
-      this.alert = new Alert("User Information");
-      this.alert.setType(AlertType.CONFIRMATION);
-      this.alert.setTimeout(1500);
-      this.tb = new TextBox("Text Editor Lite", null, 20000, 0);
-      getData();
-      this.tb.addCommand(this.exitCommand);
-      this.tb.addCommand(this.saveCommand);
-      this.tb.addCommand(this.saveAsCommand);
-      this.tb.addCommand(this.recentCommand);
-      this.tb.addCommand(this.passwordCommand);
-      this.tb.addCommand(this.clearCommand);
-      this.tb.addCommand(this.browseCommand);
-      this.tb.addCommand(this.findCommand);
-      this.tb.addCommand(this.findAgainCommand);
-      this.tb.addCommand(this.replaceCommand);
-      this.tb.addCommand(this.goToCommand);
-      this.tb.addCommand(this.topCommand);
-      this.tb.addCommand(this.bottomCommand);
-      this.tb.addCommand(this.preferencesCommand);
-      this.tb.addCommand(this.helpCommand);
-      this.tb.addCommand(this.aboutCommand);
-      this.tb.setCommandListener(this);
-      this.display.setCurrent((Displayable)this.tb);
-      this.runMode = 7;
-      runThread();
-    } 
+    if (!this.start)
+      return; 
+    this.start = false;
+    openDataStore();
+    this.display = Display.getDisplay(this);
+    this.alert = new Alert("User Information");
+    this.alert.setType(AlertType.CONFIRMATION);
+    this.alert.setTimeout(1500);
+    this.tb = new TextBox("", null, (this.largeFileWarning == 0) ? 20000 : this.largeFileWarning, 131072);
+    this.tb.setInitialInputMode("UCB_ARABIC");
+    getData();
+    this.tb.setTitle("TextView Lite");
+    this.tb.addCommand(this.exitCommand);
+    this.tb.addCommand(this.findCommand);
+    this.tb.addCommand(this.editApplyCommand);
+    this.tb.addCommand(this.editPrevCommand);
+    this.tb.addCommand(this.editNextCommand);
+    this.tb.addCommand(this.gotoCommand);
+    this.tb.addCommand(this.topCommand);
+    this.tb.addCommand(this.browseCommand);
+    this.tb.addCommand(this.recentCommand);
+    this.tb.addCommand(this.clearCommand);
+    this.tb.addCommand(this.saveCommand);
+    this.tb.addCommand(this.saveAsCommand);
+    this.tb.addCommand(this.replaceCommand);
+    this.tb.addCommand(this.preferencesCommand);
+    this.tb.addCommand(this.helpCommand);
+    this.tb.addCommand(this.aboutCommand);
+    this.tb.setCommandListener(this);
+    this.display.setCurrent((Displayable)this.tb);
+    this.runMode = 7;
+    runThread();
   }
   
   void runThread() {
@@ -232,27 +265,39 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
       showRecentFiles(); 
     if (this.runMode == 3)
       showCurrDir(); 
-    if (this.runMode == 4)
-      showFile(this.saveFile); 
+    if (this.runMode == 4) {
+      if (this.tb.getConstraints() == 0)
+        apply(); 
+      if (!this.warn && this.changes > 0) {
+        this.warn = true;
+        this.alert.setString("Text has " + this.changes + " change(s).\nYou should save it.\n\nLast change " + ((this.changed.length() == 0) ? "(unknown)" : this.changed));
+        this.saveFile = "";
+        this.display.setCurrent(this.alert, (Displayable)this.tb);
+        this.runMode = 7;
+      } else {
+        showFile(this.saveFile);
+      } 
+    } 
     if (this.runMode == 5)
       traverseDirectory(this.saveFile); 
     if (this.runMode == 6)
       processHelp(); 
-    if (this.runMode == 7)
-      setCaretPosition(); 
+    if (this.runMode != 7)
+      return; 
+    setCaretPosition();
   }
   
   void setCaretPositionToTop() {
     this.caretPosition = 0;
     this.runMode = 7;
+    this.currSection = 0;
     runThread();
   }
   
   void setCaretPosition() {
     try {
-      Thread.sleep(1000L);
+      Thread.sleep(500L);
     } catch (InterruptedException interruptedException) {}
-    this.tb.insert("", this.caretPosition);
   }
   
   void showCurrDir() {
@@ -284,14 +329,11 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
         list.setSelectCommand(this.viewCommand);
       } 
       list.addCommand(this.backCommand);
-      list.addCommand(this.exitCommand);
       list.setCommandListener(this);
       if (fileConnection != null)
         fileConnection.close(); 
       this.display.setCurrent((Displayable)list);
-    } catch (IOException iOException) {
-      iOException.printStackTrace();
-    } 
+    } catch (IOException iOException) {}
   }
   
   void traverseDirectory(String paramString) {
@@ -313,60 +355,47 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
   }
   
   void showFile(String paramString) {
+    this.debug = "";
+    try {
+      this.tb.setConstraints(131072);
+      this.tb.setTitle("TextView Lite");
+    } catch (Exception exception) {}
     try {
       FileConnection fileConnection = (FileConnection)Connector.open("file://localhost/" + this.currDirName + paramString, 1);
-      if (!fileConnection.exists())
-        throw new IOException("File does not exist"); 
       int i = (int)fileConnection.fileSize();
       if (this.largeFileWarning > 0 && i > this.largeFileWarning) {
         this.alert.setString("File exceeds large file limit");
         this.display.setCurrent(this.alert, (Displayable)this.tb);
         return;
       } 
-      this.tb.setMaxSize(i + 5000);
       DataInputStream dataInputStream = fileConnection.openDataInputStream();
       byte[] arrayOfByte = new byte[i];
       int j = dataInputStream.read(arrayOfByte, 0, i);
       dataInputStream.close();
       fileConnection.close();
       if (j == 0) {
-        this.display.setCurrent((Displayable)this.tb);
+        this.alert.setString("Text not found");
+        this.display.setCurrent(this.alert, (Displayable)this.tb);
         return;
       } 
-      if (paramString.endsWith("#") || paramString.endsWith("#.rem")) {
-        initialise();
-        setKey(this.password);
-        int k = "jCry".length();
-        byte[] arrayOfByte1 = new byte[k];
-        for (byte b1 = 0; b1 < "jCry".length(); b1++)
-          arrayOfByte1[b1] = RC4(arrayOfByte[b1]); 
-        String str = new String(arrayOfByte1);
-        if (!str.equals("jCry")) {
-          this.alert.setString("Password error");
-          this.display.setCurrent(this.alert, (Displayable)this.tb);
-          return;
-        } 
-        for (byte b2 = 0; b2 < i - k; b2++)
-          arrayOfByte[b2] = RC4(arrayOfByte[b2 + k]); 
-        try {
-          this.tb.setString(new String(arrayOfByte, 0, j - k, "UTF8"));
-        } catch (UnsupportedEncodingException unsupportedEncodingException) {
-          System.out.println("UTF8 not supported");
-          this.tb.setString(new String(arrayOfByte, 0, j - k));
-        } 
-      } else {
-        try {
-          this.tb.setString(new String(arrayOfByte, 0, j, "UTF8"));
-        } catch (UnsupportedEncodingException unsupportedEncodingException) {
-          System.out.println("UTF8 not supported");
-          this.tb.setString(new String(arrayOfByte, 0, j));
-        } 
+      try {
+        this.tb.setString(new String(arrayOfByte, 0, j, "UTF8"));
+        this.tbAll = new String(arrayOfByte, 0, j, "UTF8");
+      } catch (UnsupportedEncodingException unsupportedEncodingException) {
+        this.tb.setString(new String(arrayOfByte, 0, j));
+        this.tbAll = new String(arrayOfByte, 0, j);
       } 
       updateRecentFiles();
       this.display.setCurrent((Displayable)this.tb);
-      setCaretPositionToTop();
+      this.currSection = 0;
+      this.instance = 0;
+      this.changed = "";
+      this.changes = 0;
+      this.caretPosition = 0;
+      this.warn = false;
+      saveData();
     } catch (Exception exception) {
-      Alert alert = new Alert("User Information", "Can not access file " + paramString + " in directory " + this.currDirName + "\nException: " + exception.getMessage(), null, AlertType.ERROR);
+      Alert alert = new Alert("Error!", "Can not access file " + paramString + " in directory " + this.currDirName + "\nException: " + exception.getClass().getName(), null, AlertType.ERROR);
       alert.setTimeout(-2);
       this.display.setCurrent((Displayable)alert);
     } 
@@ -382,48 +411,25 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
         return;
       } 
       FileConnection fileConnection = (FileConnection)Connector.open("file://localhost/" + this.currDirName + this.saveFile);
-      if (fileConnection.exists())
-        fileConnection.delete(); 
       fileConnection.create();
       DataOutputStream dataOutputStream = fileConnection.openDataOutputStream();
       try {
-        arrayOfByte = this.tb.getString().getBytes("UTF8");
+        arrayOfByte = this.tbAll.getBytes("UTF8");
       } catch (UnsupportedEncodingException unsupportedEncodingException) {
-        System.out.println("UTF8 not supported");
-        arrayOfByte = this.tb.getString().getBytes();
+        arrayOfByte = this.tbAll.getBytes();
       } 
-      if (this.saveFile.endsWith("#") || this.saveFile.endsWith("#.rem")) {
-        initialise();
-        setKey(this.password);
-        byte[] arrayOfByte1 = "jCry".getBytes();
-        byte b;
-        for (b = 0; b < arrayOfByte1.length; b++)
-          arrayOfByte1[b] = RC4(arrayOfByte1[b]); 
-        dataOutputStream.write(arrayOfByte1);
-        for (b = 0; b < arrayOfByte.length; b++)
-          arrayOfByte[b] = RC4(arrayOfByte[b]); 
-      } 
-      dataOutputStream.write(arrayOfByte);
+      dataOutputStream.write(arrayOfByte, 0, arrayOfByte.length);
       dataOutputStream.close();
-      if (this.saveFile.endsWith("#") || this.saveFile.endsWith("#.rem")) {
-        String str = "";
-        if (this.saveFile.endsWith("#"))
-          str = this.saveFile.substring(0, this.saveFile.length() - 1); 
-        if (this.saveFile.endsWith("#.rem"))
-          str = this.saveFile.substring(0, this.saveFile.length() - 4); 
-        if (this.deletePlain) {
-          FileConnection fileConnection1 = (FileConnection)Connector.open("file://localhost/" + this.currDirName + str);
-          if (fileConnection1.exists())
-            fileConnection1.delete(); 
-          fileConnection1.close();
-        } 
-      } 
       fileConnection.close();
       updateRecentFiles();
       this.alert.setString("Saved");
       this.display.setCurrent(this.alert, (Displayable)this.tb);
+      this.changed = "";
+      this.changes = 0;
+      this.warn = false;
+      saveData();
     } catch (Exception exception) {
-      Alert alert = new Alert("Error!", "Can not access file " + this.saveFile + " in directory " + this.currDirName + "\nException: " + exception.getMessage(), null, AlertType.ERROR);
+      Alert alert = new Alert("Error!", "Can not access file " + this.saveFile + " in directory " + this.currDirName + "\nException: " + exception.getClass().getName(), null, AlertType.ERROR);
       alert.setTimeout(-2);
       this.display.setCurrent((Displayable)alert);
     } 
@@ -449,38 +455,7 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
     this.recentFiles[0] = this.currDirName + this.saveFile;
   }
   
-  void setKey(String paramString) {
-    byte[] arrayOfByte = paramString.getBytes();
-    int i;
-    for (i = 0; i < 256; i++)
-      this.state[i] = i; 
-    i = 0;
-    int j = 0;
-    byte b = 0;
-    do {
-      j = (arrayOfByte[i] + this.state[b] + j) % 256;
-      this.temp = this.state[b];
-      this.state[b] = this.state[j];
-      this.state[j] = this.temp;
-      i = (i + 1) % paramString.length();
-    } while (++b < ');
-  }
-  
-  byte RC4(byte paramByte) {
-    this.x %= 256;
-    this.y = (this.state[this.x] + this.y) % 256;
-    this.temp = this.state[this.x];
-    this.state[this.x] = this.state[this.y];
-    this.state[this.y] = this.temp;
-    this.temp = (this.state[this.x] + this.temp) % 256;
-    return (byte)(paramByte ^ this.state[this.temp]);
-  }
-  
-  void initialise() {
-    this.x = 0;
-    this.y = 0;
-    this.state = new int[256];
-  }
+  void initialise() {}
   
   void showRecentFiles() {
     this.f3 = new Form("Recent Files");
@@ -494,48 +469,18 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
     this.display.setCurrent((Displayable)this.f3);
   }
   
-  void getPassword() {
-    this.f = new Form("Check Password");
-    this.f.append("Type your password");
-    this.tf = new TextField("Password", "", 20, 65536);
-    this.f.append((Item)this.tf);
-    this.f.addCommand(this.okCommand);
-    this.f.setCommandListener(this);
-    this.display.setCurrent((Displayable)this.f);
-  }
-  
-  void setPassword() {
-    this.f1 = new Form("New Password");
-    this.f1.append("Type your password");
-    this.tf = new TextField("Password", "", 20, 65536);
-    this.f1.append((Item)this.tf);
-    this.tf1 = new TextField("Again", "", 20, 65536);
-    this.f1.append((Item)this.tf1);
-    this.f1.append("Delete plain text file after encryption?");
-    this.cgDelete = new ChoiceGroup("Choose", 1);
-    this.cgDelete.append("Delete", null);
-    this.cgDelete.append("Keep", null);
-    this.f1.append((Item)this.cgDelete);
-    this.f1.addCommand(this.okCommand);
-    this.f1.setCommandListener(this);
-    this.display.setCurrent((Displayable)this.f1);
-  }
-  
   void openDataStore() {
     try {
       this.rs = RecordStore.openRecordStore("jTextLite", true, 1, true);
-    } catch (RecordStoreException recordStoreException) {
-      System.err.println(recordStoreException + " te1");
-    } 
+    } catch (RecordStoreException recordStoreException) {}
   }
   
   void closeDataStore() {
-    if (this.rs != null)
-      try {
-        this.rs.closeRecordStore();
-      } catch (RecordStoreException recordStoreException) {
-        System.err.println(recordStoreException + " te2");
-      }  
+    if (this.rs == null)
+      return; 
+    try {
+      this.rs.closeRecordStore();
+    } catch (RecordStoreException recordStoreException) {}
   }
   
   int getNumRecords() {
@@ -544,7 +489,6 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
     try {
       return this.rs.getNumRecords();
     } catch (RecordStoreException recordStoreException) {
-      System.err.println(recordStoreException + " te3");
       return 0;
     } 
   }
@@ -553,11 +497,16 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
     ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
     DataOutputStream dataOutputStream = new DataOutputStream(byteArrayOutputStream);
     try {
-      dataOutputStream.writeUTF(this.tb.getString());
-      dataOutputStream.writeInt(this.tb.getCaretPosition());
+      dataOutputStream.writeUTF(this.tbAll);
+      dataOutputStream.writeInt(this.currSection);
       for (byte b = 0; b < 4; b++)
         dataOutputStream.writeUTF(this.recentFiles[b]); 
       dataOutputStream.writeInt(this.largeFileWarning);
+      dataOutputStream.writeInt(this.chunkSize);
+      dataOutputStream.writeUTF(this.sfind);
+      dataOutputStream.writeInt(this.caretPosition);
+      dataOutputStream.writeInt(this.instance);
+      dataOutputStream.writeInt(this.changes);
     } catch (IOException iOException) {}
     return byteArrayOutputStream.toByteArray();
   }
@@ -565,14 +514,18 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
   void fromByteArray(byte[] paramArrayOfbyte) {
     try {
       DataInputStream dataInputStream = new DataInputStream(new ByteArrayInputStream(paramArrayOfbyte));
-      this.tb.setString(dataInputStream.readUTF());
-      this.caretPosition = dataInputStream.readInt();
+      this.tbAll = dataInputStream.readUTF();
+      this.tb.setString(this.tbAll);
+      this.currSection = dataInputStream.readInt();
       for (byte b = 0; b < 4; b++)
         this.recentFiles[b] = dataInputStream.readUTF(); 
       this.largeFileWarning = dataInputStream.readInt();
-    } catch (IOException iOException) {
-      System.err.println(iOException + " te4a");
-    } 
+      this.chunkSize = dataInputStream.readInt();
+      this.sfind = dataInputStream.readUTF();
+      this.caretPosition = dataInputStream.readInt();
+      this.instance = dataInputStream.readInt();
+      this.changes = dataInputStream.readInt();
+    } catch (IOException iOException) {}
   }
   
   void getData() {
@@ -581,32 +534,26 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
         return; 
       byte[] arrayOfByte = this.rs.getRecord(1);
       fromByteArray(arrayOfByte);
-    } catch (RecordStoreException recordStoreException) {
-      System.err.println(recordStoreException + " te4");
-    } 
+    } catch (RecordStoreException recordStoreException) {}
   }
   
   void saveData() {
-    if (this.rs != null)
-      try {
-        if (this.saveFile.endsWith("#") || this.saveFile.endsWith("#.rem"))
-          this.tb.setString(""); 
-        byte[] arrayOfByte = toByteArray();
-        if (this.rs.getNumRecords() > 0) {
-          this.rs.setRecord(1, arrayOfByte, 0, arrayOfByte.length);
-        } else {
-          this.rs.addRecord(arrayOfByte, 0, arrayOfByte.length);
-        } 
-      } catch (RecordStoreException recordStoreException) {
-        System.err.println(recordStoreException + " te7");
-      }  
+    if (this.rs == null)
+      return; 
+    try {
+      byte[] arrayOfByte = toByteArray();
+      if (this.rs.getNumRecords() > 0) {
+        this.rs.setRecord(1, arrayOfByte, 0, arrayOfByte.length);
+      } else {
+        this.rs.addRecord(arrayOfByte, 0, arrayOfByte.length);
+      } 
+    } catch (RecordStoreException recordStoreException) {}
   }
   
   int getSize() {
     try {
       return this.rs.getSize();
     } catch (RecordStoreException recordStoreException) {
-      System.err.println(recordStoreException + " te9");
       return 0;
     } 
   }
@@ -615,12 +562,11 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
     char c = ';
     this.helpText = new TextBox("jTextLite Help", null, c, 131072);
     this.helpText.addCommand(this.okCommand);
-    this.helpText.addCommand(this.exitCommand);
     this.helpText.setCommandListener(this);
     try {
       DataInputStream dataInputStream = new DataInputStream(getClass().getResourceAsStream("/Text/jTextLiteHelp.txt"));
       if (dataInputStream == null) {
-        this.helpText.setString("Could not open help text");
+        this.helpText.setString("Help not found");
       } else {
         byte[] arrayOfByte = new byte[c];
         int i = dataInputStream.read(arrayOfByte, 0, c);
@@ -634,7 +580,11 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
   }
   
   public void commandAction(Command paramCommand, Displayable paramDisplayable) {
+    if (this.tbAll == null)
+      this.tbAll = ""; 
     if (paramCommand == this.exitCommand) {
+      if (this.tb.getConstraints() == 0)
+        apply(); 
       saveData();
       closeDataStore();
       destroyApp(true);
@@ -649,19 +599,43 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
       this.display.setCurrent((Displayable)this.f2);
       return;
     } 
+    if (paramCommand == this.gotoCommand) {
+      if (this.tb.getConstraints() == 0)
+        apply(); 
+      if (this.tbAll.length() == 0) {
+        this.alert.setString("Goto Position:\nText not found");
+        this.display.setCurrent(this.alert, (Displayable)this.tb);
+        return;
+      } 
+      this.f10 = new Form("Goto Position");
+      this.tf = new TextField("New caret position", null, 5, 2);
+      this.tf.setString("" + this.caretPosition);
+      this.f10.append((Item)this.tf);
+      this.f10.addCommand(this.okCommand);
+      this.f10.addCommand(this.cancelCommand);
+      this.f10.setCommandListener(this);
+      this.display.setCurrent((Displayable)this.f10);
+      return;
+    } 
     if (paramCommand == this.browseCommand) {
+      if (this.tb.getConstraints() == 0)
+        apply(); 
       this.saveMode = false;
       this.runMode = 3;
       runThread();
       return;
     } 
     if (paramCommand == this.saveAsCommand) {
+      if (this.tb.getConstraints() == 0)
+        apply(); 
       this.saveMode = true;
       this.runMode = 3;
       runThread();
       return;
     } 
     if (paramCommand == this.saveCommand) {
+      if (this.tb.getConstraints() == 0)
+        apply(); 
       this.runMode = 1;
       runThread();
       return;
@@ -669,14 +643,15 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
     if (paramCommand == this.viewCommand) {
       List list = (List)paramDisplayable;
       String str = list.getString(list.getSelectedIndex());
-      if (this.saveFile.equals(str))
-        return; 
+      if (this.saveFile.equals(str)) {
+        this.alert.setString(str + " already loaded");
+        this.display.setCurrent(this.alert, (Displayable)this.tb);
+        return;
+      } 
       this.saveFile = str;
       if (str.endsWith("/") || str.equals("..")) {
         this.runMode = 5;
         runThread();
-      } else if (this.saveFile.endsWith("#") || this.saveFile.endsWith("#.rem")) {
-        getPassword();
       } else {
         this.runMode = 4;
         runThread();
@@ -713,65 +688,54 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
       return;
     } 
     if (paramCommand == this.findCommand) {
-      this.f7 = new Form("Find string");
-      this.tf = new TextField("String", null, 32, 0);
-      this.f7.append((Item)this.tf);
-      this.f7.addCommand(this.okCommand);
-      this.f7.addCommand(this.cancelCommand);
-      this.f7.setCommandListener(this);
-      this.display.setCurrent((Displayable)this.f7);
-    } 
-    if (paramCommand == this.findAgainCommand) {
-      int i = this.tb.getString().toLowerCase().substring(this.caretPosition + 1).indexOf(this.tf.getString().toLowerCase());
-      if (i < 0) {
-        this.alert.setString("String not found");
+      if (this.tb.getConstraints() == 0)
+        apply(); 
+      if (this.tbAll.length() > 0) {
+        this.f7 = new Form("Find string");
+        this.tf_find = new TextField("String (case insensitive)", this.sfind, 32, 0);
+        this.f7.append((Item)this.tf_find);
+        this.f7.addCommand(this.okCommand);
+        this.f7.addCommand(this.cancelCommand);
+        this.f7.setCommandListener(this);
+        this.display.setCurrent((Displayable)this.f7);
+      } else {
+        this.alert.setString("Find:\nText not found");
         this.display.setCurrent(this.alert, (Displayable)this.tb);
         return;
       } 
-      this.caretPosition += 1 + i;
-      this.display.setCurrent((Displayable)this.tb);
-      this.runMode = 7;
-      runThread();
-      return;
     } 
     if (paramCommand == this.replaceCommand) {
-      this.f8 = new Form("Replace");
-      this.tf = new TextField("Old String", null, 32, 0);
-      this.f8.append((Item)this.tf);
-      this.tf1 = new TextField("New String", null, 32, 0);
-      this.f8.append((Item)this.tf1);
-      this.cgReplaceAll = new ChoiceGroup("Replace All", 1);
-      this.cgReplaceAll.append("No", null);
-      this.cgReplaceAll.append("Yes", null);
-      this.f8.append((Item)this.cgReplaceAll);
-      this.f8.addCommand(this.okCommand);
-      this.f8.addCommand(this.cancelCommand);
-      this.f8.setCommandListener(this);
-      this.display.setCurrent((Displayable)this.f8);
-    } 
-    if (paramCommand == this.goToCommand) {
-      this.f6 = new Form("Go to position");
-      this.tf = new TextField("Position (0 to " + this.tb.size() + ")", null, 8, 2);
-      this.f6.append((Item)this.tf);
-      this.f6.addCommand(this.okCommand);
-      this.f6.addCommand(this.cancelCommand);
-      this.f6.setCommandListener(this);
-      this.display.setCurrent((Displayable)this.f6);
+      if (this.tb.getConstraints() == 0)
+        apply(); 
+      if (this.tbAll.length() > 0) {
+        this.f8 = new Form("Replace");
+        this.tf_find = new TextField("Old String", this.sfind, 32, 0);
+        this.f8.append((Item)this.tf_find);
+        this.tf_repl = new TextField("New String", this.srepl, 32, 0);
+        this.f8.append((Item)this.tf_repl);
+        this.cgReplaceAll = new ChoiceGroup("Replace All", 1);
+        this.cgReplaceAll.append("No", null);
+        this.cgReplaceAll.append("Yes", null);
+        this.f8.append((Item)this.cgReplaceAll);
+        this.f8.addCommand(this.okCommand);
+        this.f8.addCommand(this.cancelCommand);
+        this.f8.setCommandListener(this);
+        this.display.setCurrent((Displayable)this.f8);
+      } else {
+        this.alert.setString("Replace:\nText not found");
+        this.display.setCurrent(this.alert, (Displayable)this.tb);
+        return;
+      } 
     } 
     if (paramCommand == this.topCommand) {
+      if (this.tb.getConstraints() == 0)
+        apply(); 
+      this.tb.setString((new StringBuffer(this.tbAll)).toString());
+      this.alert.setString("Top issued\nWas at caret position: " + this.caretPosition + "\nChunk: " + (this.currSection + 1));
+      this.currSection = 0;
+      this.instance = 0;
       this.caretPosition = 0;
-      this.runMode = 7;
-      runThread();
-      return;
-    } 
-    if (paramCommand == this.bottomCommand) {
-      this.caretPosition = this.tb.size();
-      this.runMode = 7;
-      runThread();
-      return;
-    } 
-    if (paramCommand == this.passwordCommand) {
-      setPassword();
+      this.display.setCurrent(this.alert, (Displayable)this.tb);
       return;
     } 
     if (paramCommand == this.backCommand) {
@@ -780,9 +744,12 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
     } 
     if (paramCommand == this.preferencesCommand) {
       this.f5 = new Form("Preferences");
-      this.tf = new TextField("Warn before opening large file (0 = no warning)", null, 8, 2);
+      this.tf = new TextField("Warn before opening large file (0 = no warning)", null, 5, 2);
       this.tf.setString("" + this.largeFileWarning);
+      this.tf1 = new TextField("Chunk size", null, 4, 2);
+      this.tf1.setString("" + this.chunkSize);
       this.f5.append((Item)this.tf);
+      this.f5.append((Item)this.tf1);
       this.f5.addCommand(this.okCommand);
       this.f5.addCommand(this.cancelCommand);
       this.f5.setCommandListener(this);
@@ -796,11 +763,59 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
     } 
     if (paramCommand == this.aboutCommand) {
       this.f9 = new Form("About");
-      this.f9.append("jTextLite 1.01");
+      this.f9.append("jTextLite 2.02");
+      this.f9.append("File size: " + this.tbAll.length() + "\nCaret position: " + this.caretPosition + "\nChunk: " + (this.currSection + 1) + "/" + ((this.tbAll.length() + this.chunkSize - 1) / this.chunkSize));
       this.f9.append("(c) Malcolm Bryant & FreEPOC 2009");
+      this.f9.append("Modified by me (Shahar) - to make it work."); // \nRemoved: Encryption"); // 2000 chunk maximum // on large files, with replace, find
+      if (this.debug.length() > 0)
+        this.f9.append("debug =" + this.debug); 
       this.f9.addCommand(this.okCommand);
       this.f9.setCommandListener(this);
       this.display.setCurrent((Displayable)this.f9);
+      this.runMode = 7;
+      runThread();
+      return;
+    } 
+    if (paramCommand == this.editNextCommand) {
+      if (this.tb.getConstraints() == 0)
+        apply(); 
+      if ((this.currSection + 1) * this.chunkSize < this.tbAll.length()) {
+        this.currSection++;
+        // this.alert.setString("Edit chunk '" + currSection + "\nApply Edit to change, Top to restart");
+      } else {
+        // this.alert.setString("Edit chunk 'last'\nApply Edit to change, Top to restart");
+        this.currSection = 0;
+      } 
+      edit();
+      this.display.setCurrent(this.alert, (Displayable)this.tb);
+      this.runMode = 7;
+      runThread();
+      return;
+    } 
+    if (paramCommand == this.editPrevCommand) {
+      if (this.tb.getConstraints() == 0)
+        apply(); 
+      if ((this.currSection - 1) * this.chunkSize >= 0) {
+        this.currSection--;
+      } else {
+        this.currSection = (this.tbAll.length() - 1) / this.chunkSize;
+      } 
+      edit();
+      this.display.setCurrent(this.alert, (Displayable)this.tb);
+      this.runMode = 7;
+      runThread();
+      return;
+    } 
+    if (paramCommand == this.editApplyCommand) {
+      if (this.tb.getConstraints() == 131072) {
+        edit();
+        this.display.setCurrent(this.alert, (Displayable)this.tb);
+      } else {
+        this.display.setCurrent((Displayable)this.tb);
+        apply();
+      } 
+      this.runMode = 7;
+      runThread();
       return;
     } 
     if (paramDisplayable == this.helpText) {
@@ -808,46 +823,38 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
       this.helpText = null;
       return;
     } 
-    if (paramDisplayable == this.f && paramCommand == this.okCommand) {
-      this.password = this.tf.getString();
-      this.runMode = 4;
-      runThread();
-      return;
-    } 
-    if (paramDisplayable == this.f1 && paramCommand == this.okCommand) {
-      if (this.tf1.getString().equals(this.tf.getString())) {
-        if (this.tf.getString().equals("")) {
-          if (this.saveFile.endsWith("#"))
-            this.saveFile = this.saveFile.substring(0, this.saveFile.length() - 1); 
-          if (this.saveFile.endsWith("#.rem"))
-            this.saveFile = this.saveFile.substring(0, this.saveFile.length() - 5); 
-        } else {
-          if (!this.saveFile.endsWith("#") && !this.saveFile.endsWith("#.rem"))
-            this.saveFile += "#"; 
-          if (this.cgDelete.getSelectedIndex() == 0) {
-            this.deletePlain = true;
-          } else {
-            this.deletePlain = false;
-          } 
-        } 
-        updateRecentFiles();
-        this.password = this.tf.getString();
-        this.display.setCurrent((Displayable)this.tb);
+    if (paramDisplayable == this.f2 && paramCommand == this.okCommand) { // clearCommand
+      if (this.tb.getConstraints() == 0)
+        apply(); 
+      if (this.tbAll.length() == 0) {
+        this.alert.setString("Clear:\nText not found");
+        this.display.setCurrent(this.alert, (Displayable)this.tb);
         return;
       } 
-      this.passwordError++;
-      if (this.passwordError == 3)
-        destroyApp(true); 
-      this.alert.setString("Password error");
-      this.display.setCurrent(this.alert, (Displayable)this.f1);
-      return;
-    } 
-    if (paramDisplayable == this.f2 && paramCommand == this.okCommand) {
+      if (!this.warn && this.changes > 0) {
+        this.warn = true;
+        this.alert.setString("Text has " + this.changes + " change(s).\nYou should save it.\n\nLast change " + ((this.changed.length() == 0) ? "(unknown)" : this.changed));
+        this.saveFile = "";
+        this.display.setCurrent(this.alert, (Displayable)this.tb);
+        return;
+      } 
+      this.tbAll = "";
+      this.changed = "";
+      this.changes = 0;
+      this.saveFile = "";
+      this.warn = false;
+      this.instance = 0;
       this.tb.setString("");
-      this.display.setCurrent((Displayable)this.tb);
+      this.tb.setTitle("TextView Lite");
+      this.tb.setConstraints(131072);
+      this.alert.setString("Clear issued");
+      this.display.setCurrent(this.alert, (Displayable)this.tb);
+      this.caretPosition = 0;
+      this.currSection = 0;
+      saveData();
       return;
     } 
-    if (paramDisplayable == this.f3 && paramCommand == this.okCommand) {
+    if (paramDisplayable == this.f3 && paramCommand == this.okCommand) { // recent
       String str = this.cgrf.getString(this.cgrf.getSelectedIndex());
       if (str.equals("(empty)")) {
         this.alert.setString("Unassigned file");
@@ -855,12 +862,8 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
       } else {
         this.saveFile = str.substring(str.lastIndexOf('/') + 1);
         this.currDirName = str.substring(0, str.lastIndexOf('/') + 1);
-        if (this.saveFile.endsWith("#") || this.saveFile.endsWith("#.rem")) {
-          getPassword();
-        } else {
-          this.runMode = 4;
-          runThread();
-        } 
+        this.runMode = 4;
+        runThread();
       } 
       return;
     } 
@@ -872,48 +875,102 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
       runThread();
       return;
     } 
-    if (paramDisplayable == this.f5 && paramCommand == this.okCommand) {
+    if (paramDisplayable == this.f5 && paramCommand == this.okCommand) { // preferences
       this.largeFileWarning = Integer.valueOf(this.tf.getString()).intValue();
+      this.chunkSize = Integer.valueOf(this.tf1.getString()).intValue();
+      if (this.chunkSize < 5)
+        this.chunkSize = 5; 
+      this.currSection = 0;
+      saveData();
       this.display.setCurrent((Displayable)this.tb);
       return;
     } 
-    if (paramDisplayable == this.f6 && paramCommand == this.okCommand) {
-      this.caretPosition = Integer.valueOf(this.tf.getString()).intValue();
-      if (this.caretPosition < 0)
-        this.caretPosition = 0; 
-      if (this.caretPosition > this.tb.size())
-        this.caretPosition = this.tb.size(); 
-      this.display.setCurrent((Displayable)this.tb);
-      this.runMode = 7;
-      runThread();
-      return;
-    } 
-    if (paramDisplayable == this.f7 && paramCommand == this.okCommand) {
-      int i = this.tb.getString().toLowerCase().indexOf(this.tf.getString().toLowerCase());
-      if (i < 0) {
-        this.alert.setString("String not found");
+    if (paramDisplayable == this.f10 && paramCommand == this.okCommand) { // goto
+      if (this.tf.getString().length() == 0) {
+        this.alert.setString("Goto:\nCaret Position not found");
         this.display.setCurrent(this.alert, (Displayable)this.tb);
         return;
       } 
-      this.caretPosition = i;
-      this.display.setCurrent((Displayable)this.tb);
+      this.caretPosition = Integer.valueOf(this.tf.getString()).intValue();
+      if (this.caretPosition >= this.tbAll.length())
+        this.caretPosition = this.tbAll.length() - 1; 
+      this.currSection = (this.caretPosition + 1) / this.chunkSize;
+      saveData();
+      byte b = 100;
+      int i = this.caretPosition - b;
+      if (i < 0)
+        i = 0; 
+      int j = this.caretPosition + b;
+      if (j >= this.tbAll.length())
+        j = this.tbAll.length(); 
+      this.alert.setString(this.tbAll.substring(i, j));
+      this.display.setCurrent(this.alert, (Displayable)this.tb);
+      return;
+    } 
+    if (paramDisplayable == this.f7 && paramCommand == this.okCommand) { // findCommand
+      this.sfind = this.tf_find.getString();
+      if (this.sfind.length() == 0) {
+        this.alert.setString("Find:\nText not found");
+        this.display.setCurrent(this.alert, (Displayable)this.tb);
+        return;
+      } 
+      saveData(); // save the sfind
+      int i = this.tbAll.toLowerCase().substring(this.caretPosition).indexOf(this.tf_find.getString().toLowerCase());
+      if (i < 0) {
+        this.alert.setString("String '" + this.tf_find.getString() + "' not found\nWrap around...");
+        this.display.setCurrent(this.alert, (Displayable)this.tb);
+        this.caretPosition = 0;
+        this.instance = 0;
+        return;
+      } 
+      this.instance++;
+      byte b = 30;
+      int j = this.caretPosition + i - b;
+      if (j < 0)
+        j = 0; 
+      int k = this.caretPosition + this.tf_find.getString().length() + i + b;
+      if (k >= this.tbAll.length())
+        k = this.tbAll.length(); 
+      this.currSection = (this.caretPosition + i + 1) / this.chunkSize;
+      this.alert.setString("Instance " + this.instance + " on " + ((this.caretPosition + i + 1) * 100 / this.tbAll.length()) + "%\n\n" + this.tbAll.substring(j, this.caretPosition + i) + "**" + this.sfind + "**" + this.tbAll.substring(this.caretPosition + i + this.sfind.length(), k) + "\n\nChunk is " + (this.currSection + 1) + "\n(" + ((this.caretPosition + i + 1) % this.chunkSize) + " " + ((this.caretPosition + i + 1) % this.chunkSize * 100 / this.chunkSize) + "%)");
+      this.display.setCurrent(this.alert, (Displayable)this.tb);
+      this.caretPosition += 1 + i;
       this.runMode = 7;
       runThread();
       return;
     } 
-    if (paramDisplayable == this.f8 && paramCommand == this.okCommand) {
-      this.caretPosition = this.tb.getCaretPosition();
+    if (paramDisplayable == this.f8 && paramCommand == this.okCommand) { // replaceCommand
+      this.sfind = this.tf_find.getString();
+      this.srepl = this.tf_repl.getString();
+      if (this.sfind.length() == 0) {
+        this.alert.setString("Replace:\nText not found");
+        this.display.setCurrent(this.alert, (Displayable)this.tb);
+        return;
+      } 
       byte b = 0;
       do {
-        int i = this.tb.getString().toLowerCase().substring(this.caretPosition).indexOf(this.tf.getString().toLowerCase());
+        int i = this.tbAll.toLowerCase().substring(this.caretPosition).indexOf(this.tf_find.getString().toLowerCase());
         if (i < 0)
           break; 
-        this.tb.delete(this.caretPosition + i, this.tf.getString().length());
-        this.tb.insert(this.tf1.getString(), this.caretPosition + i);
+        this.changed = "at chunk" + ((i + this.caretPosition) % this.chunkSize + 1) + " " + ((i + this.caretPosition) % this.chunkSize * 100 / this.chunkSize) + "%" + ": was '" + this.tf_find.getString() + "', now '" + this.tf_repl.getString() + "'";
+        this.changes++;
+        this.warn = false;
+        StringBuffer stringBuffer = new StringBuffer(this.tbAll.substring(0, this.caretPosition + i));
+        stringBuffer.append(this.tf_repl.getString());
+        stringBuffer.append(this.tbAll.substring(this.caretPosition + i + this.tf_find.getString().length(), this.tbAll.length()));
+        this.tbAll = stringBuffer.toString();
         b++;
-        this.caretPosition += i + this.tf1.getString().length();
+        this.caretPosition += i + this.tf_repl.getString().length();
       } while (this.cgReplaceAll.getSelectedIndex() != 0);
-      this.alert.setString(b + " replaced");
+      if (b > 0) {
+        this.tb.setString((new StringBuffer(this.tbAll)).toString());
+      } else {
+        this.alert.setString("String '" + this.tf_find.getString() + "' not found\nWrap around...");
+        this.display.setCurrent(this.alert, (Displayable)this.tb);
+        this.caretPosition = 0;
+        return;
+      } 
+      this.alert.setString("Replaced: " + b);
       this.display.setCurrent(this.alert, (Displayable)this.tb);
       this.runMode = 7;
       runThread();
@@ -923,10 +980,110 @@ public class jTextLite extends MIDlet implements CommandListener, Runnable {
       this.display.setCurrent((Displayable)this.tb);
       return;
     } 
-    if (paramCommand == this.cancelCommand) {
-      this.alert.setString("Cancelled");
-      this.display.setCurrent(this.alert, (Displayable)this.tb);
-      return;
-    } 
+    if (paramCommand != this.cancelCommand)
+      return; 
+    this.alert.setString("Cancelled");
+    this.display.setCurrent(this.alert, (Displayable)this.tb);
   }
+  
+  private void edit() {
+    try {
+        this.alert.setString("Chunk " + (currSection+1) + "/" + (tbAll.length()+chunkSize-1) / chunkSize);
+        int length = chunkSize;
+        if (chunkSize*currSection + length > tbAll.length())
+          length = tbAll.length() - chunkSize*currSection;
+        tb.setString(new StringBuffer(tbAll.substring(chunkSize*currSection, chunkSize*currSection + length)).toString() + "\n\n") ;
+
+        inEdit = false;
+        tb.setTitle("EDIT MODE");
+    tb.setConstraints(TextField.ANY);
+//        tb.setMaxSize(chunkSize+10);
+        debug = "";
+        inEdit = true;
+    }
+    catch (Exception e3) {
+        this.alert.setString("Edit again");
+//            debug += " on edit " + e3.getClass().toString(); // getMessage(); // Class().getName();
+    }
+  }
+
+  private void apply() {
+
+    if (!inEdit) {
+        this.tb.setString(new StringBuffer(tbAll).toString());
+        this.alert.setString("Edit again.\n(last time:)");
+        this.display.setCurrent(this.alert, this.tb);
+    }
+    else {
+      try{
+        // start
+        StringBuffer s = new StringBuffer(tbAll.substring(0, chunkSize*currSection));
+        // middle
+        int twoSlashN = tb.getString().length();
+        if (tb.getString().endsWith("\n\n"))
+          twoSlashN -= "\n\n".length();
+        else if(tb.getString().endsWith("\n"))
+          twoSlashN -= "\n".length();
+        s.append(tb.getString().substring(0, twoSlashN));
+
+        // end
+        if (tbAll.length() > chunkSize*(currSection+1))
+          s.append(tbAll.substring(chunkSize*(currSection+1)));
+
+        String diff = compareTo(tbAll, s.toString());
+
+        if (/*! changed && */ //0 != tbAll.compareTo(s.toString())) {
+          diff.length() > 0) {
+          changed = diff;
+          warn = false;
+          this.tbAll = s.toString();
+          saveData();
+        }
+        else
+          this.tbAll = s.toString();
+
+        this.tb.setString(s.toString());
+      }
+      catch (Exception e3) {
+        // debug += " on apply (new) " + e3.getMessage();
+      }
+    }
+
+    tb.setTitle("TextView Lite");
+    tb.setConstraints(TextField.UNEDITABLE);
+  }
+
+  public String compareTo(String thi, String anotherString)
+  {
+    StringBuffer b= new StringBuffer("at ");
+    int len1 = thi.length();
+    int len2 = anotherString.length();
+    int n = Math.min(len1, len2);
+    int i = 0;
+
+    while (n-- != 0) {
+      char c1 = thi.charAt(i++);
+      char c2 = anotherString.charAt(i++);
+      if (c1 != c2) {
+        changes++;
+        b.append("" + i);
+        b.append(" chunk " + ((i+1)/  chunkSize + 1) + " " + (i% chunkSize)*100/chunkSize + "%");
+        b.append(": was ").append(thi.substring(i-1, i)).append("', now '").append(anotherString.substring(i-1, i)).append( "'");
+        caretPosition = i;
+        return b.toString();
+      }
+    }
+
+    if (len1 - len2 != 0) {
+        changes++;
+        b.append("" + i);
+        b.append(" chunk " + ((i+1)/  chunkSize + 1) + " " + (i% chunkSize)*100/chunkSize + "%");
+        b.append(": diff' length");
+        caretPosition = i;
+        return b.toString();
+    }
+
+    return changed;
+  }
+
 }
