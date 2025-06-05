@@ -5,3 +5,9 @@ As far as I remember, my (now broken) phone supported de-facto a save operation 
 
 Using decompile, I did some modification to make it work.
 It was never published to anyone else, was just a kind of exercise.
+
+Refer to https://freepoc.org/downloads/
+
+Upload its Jar into https://github.com/zb3/freej2me-web
+
+!["Nokia reminder"](nokia-reminder.png "Nokia Reminder")
